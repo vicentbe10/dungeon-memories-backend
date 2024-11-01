@@ -28,6 +28,10 @@ app.get('/', (req, res) => {
   res.send('Server is running');
 });
 
+// Route for downloading the audio files
+const audioFilesRoutes = require("./routes/audioFiles");
+app.use('/audio', audioFilesRoutes);
+
 // Socket.io connection handler
 io.on('connection', (socket) => {
   console.log(`New client connected: ${socket.id}`);
