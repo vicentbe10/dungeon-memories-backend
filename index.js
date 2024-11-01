@@ -5,7 +5,8 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const knex = require('knex')(require('./knexfile').development);
+// const knex = require('knex')(require('./knexfile').development);
+const knex = require("./knex");
 
 const app = express();
 const server = http.createServer(app);
