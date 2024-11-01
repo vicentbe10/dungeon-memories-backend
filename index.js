@@ -11,6 +11,17 @@ const knex = require('knex')(config);
 
 const app = express();
 const server = http.createServer(app);
+
+const recordingsDir = path.join(__dirname, 'recordings');
+
+// Ensure the recordings directory exists
+if (!fs.existsSync(recordingsDir)) {
+  fs.mkdirSync(recordingsDir);
+  console.log('Created recordings directory');
+} else {
+  console.log('Recordings directory already exists');
+}
+
 const io = new Server(server, {
   cors: {
     origin: '*', // TO DO - Update with frontend URL in production
@@ -40,17 +51,28 @@ io.on('connection', (socket) => {
   const filename = `audio_${socket.id}_${Date.now()}.webm`;
   const filePath = path.join(__dirname, 'recordings', filename);
   const writeStream = fs.createWriteStream(filePath);
+  console.log('Saving audio to:', filePath);
+
+  writeStream.on('error', (err) => {
+    console.error('Error writing to file:', err);
+  });
 
   socket.on('audioChunk', (data) => {
-    // Write audio chunk to file
-    writeStream.write(Buffer.from(data));
+    try {
+      // Write audio chunk to file
+      writeStream.write(Buffer.from(data));
+    } catch (error) {
+      console.error("Error writing audio chink: ", error);
+    }
 
     // TO DO - implement real-time transcription here
   });
 
   socket.on('disconnect', () => {
     console.log(`Client disconnected: ${socket.id}`);
-    writeStream.end();
+    writeStream.end(() => {
+      console.log("Finished writing audio file.")
+    });
 
     // Save file reference to the database
     knex('audio_files')
