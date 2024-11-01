@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const environment = process.env.NODE_ENV || 'development';
-const config = require('./knexfile')[environment];
+const config = require('../knexfile')[environment];
 const bcrypt = require('bcrypt');
 
 // Register a new user
