@@ -1,35 +1,52 @@
 const express = require('express');
-const path = require('path');
 const router = express.Router();
-const fs = require("fs");
 
-// TO DO Middleware for authentication
+// Firebase Admin SDK
+const admin = require('firebase-admin');
+const db = require('knex')(require('../knexfile')[process.env.NODE_ENV || 'development']);
+
+// TODO: Middleware for authentication
 // const authenticate = require('../middleware/authenticate');
 
-router.get('/download/:filename', /* authenticate, */ (req, res) => {
+router.get('/download/:filename', /* authenticate, */ async (req, res) => {
   const filename = req.params.filename;
-  const filePath = path.join(__dirname, '..', 'recordings', filename);
   
-  console.log('__dirname:', __dirname);
-  console.log('filePath:', filePath);
+  try {
+    // Fetch file record from the database
+    const fileRecord = await db('audio_files')
+      .where({ filename})
+      .first();
 
-  //Check if the file exists
-  fs.access(filePath, fs.constants.R_OK, (err) => {
-    if (err) {
-      console.error("File not found or inaccessible: ", err);
-      return res.status(404).send("File not found.");
+    if (!fileRecord) {
+      console.error('File not found in the database.');
+      return res.status(404).send('File not found.');
     }
-  })
 
-  // Security check: Ensure the file exists and the user has permission to access it
-  // Maybe even checking the database to verify ownership
+    // Get a reference to the file in Firebase Storage
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(filename);
 
-  res.download(filePath, filename, (err) => {
-    if (err) {
-      console.error('Error downloading file:', err);
-      res.status(500).send('Error downloading file: ', err.message);
+    // Generate a signed URL for the file (valid for 1hour)
+    const expiresAt = Date.now() + 60 * 60 * 1000;
+
+    const [url] = await file.getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: expiresAt,
+    });
+
+    if (!url) {
+      console.error('Failed to generate signed URL.');
+      return res.status(500).send('Error generating download URL.');
     }
-  });
+
+    // Redirect the client to the signed URL
+    res.redirect(url);
+
+  } catch (err) {
+      console.error('Error in download route: ', err);
+      res.status(500).send('Error downloading file.');
+  }
 });
 
 module.exports = router;

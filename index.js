@@ -3,89 +3,114 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const knex = require('knex')
 const path = require('path');
-const fs = require('fs');
+
+// Firebase Admin SDK
+const admin = require('firebase-admin');
+
+// Get environment (dev or prod)
 const environment = process.env.NODE_ENV || 'development';
 const config = require('./knexfile')[environment];
-const knex = require('knex')(config);
+const db = knex(config);
+
+// Initialize Firebase
+const serviceAccount = require('./dungeon-memories-77f7e-firebase-adminsdk-r1sal-81e1570c04.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  storageBucket: process.env.STORAGE_BUCKET,
+});
+
+const bucket = admin.storage().bucket();
 
 const app = express();
 const server = http.createServer(app);
-
-const recordingsDir = path.join(__dirname, 'recordings');
-
-// Ensure the recordings directory exists
-if (!fs.existsSync(recordingsDir)) {
-  fs.mkdirSync(recordingsDir);
-  console.log('Created recordings directory');
-} else {
-  console.log('Recordings directory already exists');
-}
-
 const io = new Server(server, {
   cors: {
     origin: '*', // TO DO - Update with frontend URL in production
   },
 });
 
-const userRoutes = require ("./routes/users");
-
 app.use(cors());
 app.use(express.json());
-app.use("/users", userRoutes);
+
+// Import routes
+const userRoutes = require ('./routes/users');
+app.use('/users', userRoutes);
+
+// Route for downloading the audio files
+const audioFilesRoutes = require('./routes/audioFiles');
+app.use('/audio', audioFilesRoutes);
 
 // Simple route to test server
 app.get('/', (req, res) => {
   res.send('Server is running');
 });
 
-// Route for downloading the audio files
-const audioFilesRoutes = require("./routes/audioFiles");
-app.use('/audio', audioFilesRoutes);
-
 // Socket.io connection handler
 io.on('connection', (socket) => {
   console.log(`New client connected: ${socket.id}`);
 
-  // Create a write stream for the audio file
-  const filename = `audio_${socket.id}_${Date.now()}.webm`;
-  const filePath = path.join(__dirname, 'recordings', filename);
-  const writeStream = fs.createWriteStream(filePath);
-  console.log('Saving audio to:', filePath);
-
-  writeStream.on('error', (err) => {
-    console.error('Error writing to file:', err);
-  });
+  // Collect audio chunks
+  let audioChunks = [];
 
   socket.on('audioChunk', (data) => {
-    try {
-      // Write audio chunk to file
-      writeStream.write(Buffer.from(data));
-    } catch (error) {
-      console.error("Error writing audio chink: ", error);
-    }
-
-    // TO DO - implement real-time transcription here
+    // Collect audio data chunks
+    audioChunks.push(Buffer.from(data));
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log(`Client disconnected: ${socket.id}`);
-    writeStream.end(() => {
-      console.log("Finished writing audio file.")
-    });
 
-    // Save file reference to the database
-    knex('audio_files')
-      .insert({
-        filename: filename,
-        // Add session_id and user_id if available
-      })
-      .then(() => {
-        console.log('Audio file reference saved to database');
-      })
-      .catch((err) => {
-        console.error('Error saving to database:', err);
+    if (audioChunks.length > 0) {
+      // Concatenate audio chunks into a single buffer
+      const audioBuffer = Buffer.concat(audioChunks);
+
+      // Define the filename
+      const filename = `audio_${socket.id}_${Date.now()}.webm`;
+
+      // Create a file reference in Firebase Storage
+      const file = bucket.file(filename);
+
+      // Create a stream to upload the file
+      const stream = file.createWriteStream({
+        metadata: {
+          contentType: 'audio/webm',
+        },
       });
+
+      // Handle errors during upload
+      stream.on('error', (err) => {
+        console.error('Error uploading to Firebase Storage:', err);
+      });
+
+      // Handle successful upload
+      stream.on('finish', async () => {
+        console.log('Audio file uploaded to Firebase Storage');
+
+        // Get the public URL
+        const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(file.name)}?alt=media`;
+        console.log("Public URL : ", publicUrl);
+
+        // Save the file URL to the database
+        try {
+          await db('audio_files').insert({
+            filename: filename,
+            url: publicUrl,
+            // Include session_id and user_id if available
+          });
+          console.log('Audio file reference saved to database');
+        } catch (err) {
+          console.error('Error saving to database:', err);
+        }
+      });
+
+      // Write the audio buffer to the stream
+      stream.end(audioBuffer);
+    } else {
+      console.log('No audio data received from client.');
+    }
   });
 });
 
