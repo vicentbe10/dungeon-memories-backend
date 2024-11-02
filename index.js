@@ -15,7 +15,11 @@ const config = require('./knexfile')[environment];
 const db = knex(config);
 
 // Initialize Firebase
-const serviceAccount = require('./dungeon-memories-77f7e-firebase-adminsdk-r1sal-81e1570c04.json');
+if (process.env.NODE_ENV === 'production') {
+  const serviceAccount = require('./sercice-account.json');
+} else {
+  const serviceAccount = require('./dungeon-memories-77f7e-firebase-adminsdk-r1sal-81e1570c04.json');
+}
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
