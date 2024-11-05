@@ -16,19 +16,17 @@ const db = knex(config);
 
 // Initialize Firebase
 const serviceAccount = require('./dungeon-memories-77f7e-firebase-adminsdk-r1sal-81e1570c04.json');
-
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   storageBucket: process.env.STORAGE_BUCKET,
 });
-
 const bucket = admin.storage().bucket();
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: '*', // TO DO - Update with frontend URL in production
+    origin: '*', // TODO - Update with frontend URL in production
   },
 });
 
@@ -48,71 +46,109 @@ app.get('/', (req, res) => {
   res.send('Server is running');
 });
 
+// Map to manage the rooms and their participants
+// The structure should contain: room id, participants (their sockets ids), and audio chunks
+const rooms = new Map();
+
 // Socket.io connection handler
 io.on('connection', (socket) => {
   console.log(`New client connected: ${socket.id}`);
+
+  // Join a room
+  socket.on('joinRoom', (roomId) => {
+    console.log(`client ${socket.id} has joined the room: ${roomId}`);
+
+    if (!rooms.has(roomId)) {
+      rooms.set(roomId, {participants: new Set(), audioChunks: []})
+    }
+    const room = rooms.get(roomId);
+    room.participants.add(socket.id);
+
+    socket.join(roomId);
+  })
 
   // Collect audio chunks
   let audioChunks = [];
 
   socket.on('audioChunk', (data) => {
-    // Collect audio data chunks
-    audioChunks.push(Buffer.from(data));
+    // Find the room the socket is in
+    for (const [roomId, room] of rooms) {
+      if (room.participants.has(socket.id)) {
+        // Push audio data to the room collective audio buffer
+        room.audioChunks.push(Buffer.from(data));
+        break;
+      }
+    }
   });
 
+  // Handle client disconnect
   socket.on('disconnect', async () => {
     console.log(`Client disconnected: ${socket.id}`);
 
-    if (audioChunks.length > 0) {
-      // Concatenate audio chunks into a single buffer
-      const audioBuffer = Buffer.concat(audioChunks);
-
-      // Define the filename
-      const filename = `audio_${socket.id}_${Date.now()}.webm`;
-
-      // Create a file reference in Firebase Storage
-      const file = bucket.file(filename);
-
-      // Create a stream to upload the file
-      const stream = file.createWriteStream({
-        metadata: {
-          contentType: 'audio/webm',
-        },
-      });
-
-      // Handle errors during upload
-      stream.on('error', (err) => {
-        console.error('Error uploading to Firebase Storage:', err);
-      });
-
-      // Handle successful upload
-      stream.on('finish', async () => {
-        console.log('Audio file uploaded to Firebase Storage');
-
-        // Get the public URL
-        const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(file.name)}?alt=media`;
-        console.log("Public URL : ", publicUrl);
-
-        // Save the file URL to the database
-        try {
-          await db('audio_files').insert({
-            filename: filename,
-            url: publicUrl,
-            // Include session_id and user_id if available
-          });
-          console.log('Audio file reference saved to database');
-        } catch (err) {
-          console.error('Error saving to database:', err);
+    // Find and remove client from the room
+    for (const [roomId, room] of rooms) {
+      // Check if the socket deletion is successful
+      if (room.participants.delete(socket.id)) {
+        // If the room is empty, finalize the audio and save
+        if (room.participants.size === 0) {
+          if (room.audioChunks.length > 0) {
+            // Concatemate audio chunks into a single buffer
+            const audioBuffer = Buffer.concat(room.audioChunks);
+            await saveAudioToFirebase(audioBuffer, roomId);
+          }
+          rooms.delete(roomId); 
         }
-      });
-
-      // Write the audio buffer to the stream
-      stream.end(audioBuffer);
-    } else {
-      console.log('No audio data received from client.');
+        break;
+      }
     }
   });
 });
+
+// New independent function to save audio bugger to Firebase
+
+async function saveAudioToFirebase(audioBuffer, roomId) {
+  // Define the filename
+  const filename = `audio_${roomId}_${Date.now()}.webm`;
+  console.log (filename);
+  // Create a file reference in Firebase Storage
+  const file = bucket.file(filename);
+  // Create a stream to upload the file
+  const stream = file.createWriteStream({
+    metadata: {
+      contentType: 'audio/webm',
+    },
+  });
+
+  // Handle errors during upload
+  stream.on('error', (err) => {
+    console.error('Error uploading to Firebase Storage:', err);
+  });
+
+  // Handle successful upload
+  stream.on('finish', async () => {
+    console.log('Audio file uploaded to Firebase Storage');
+    // Get the public URL
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(file.name)}?alt=media`;
+    console.log("Public URL : ", publicUrl);
+
+    // Save the file URL to the database
+    try {
+      await db('audio_files').insert({
+        filename: filename,
+        url: publicUrl,
+        // roomId: roomId, // TODO - Is the roomId useful?? maybe as the game session Name? If so, need to modify database
+        // Include session_id and user_id if available
+      });
+      console.log('Audio file reference saved to database');
+    } catch (err) {
+      console.error('Error saving to database:', err);
+    }
+  });
+
+   // Write the audio buffer to the stream
+   stream.end(audioBuffer);
+
+}
 
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
