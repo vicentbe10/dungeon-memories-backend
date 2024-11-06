@@ -5,6 +5,9 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const knex = require('knex')
 const path = require('path');
+const { AssemblyAI } = require('assemblyai');
+const openaiRequest = require('./src/openairequest');
+// const transcribeWithAssemblyAI = require('./src/transcriptions')
 
 // Firebase Admin SDK
 const admin = require('firebase-admin');
@@ -140,6 +143,9 @@ async function saveAudioToFirebase(audioBuffer, roomId) {
         // Include session_id and user_id if available
       });
       console.log('Audio file reference saved to database');
+      
+      // Start transcription after saving
+      const transcriptText = await transcribeWithAssemblyAI (publicUrl, roomId);
     } catch (err) {
       console.error('Error saving to database:', err);
     }
@@ -147,8 +153,39 @@ async function saveAudioToFirebase(audioBuffer, roomId) {
 
    // Write the audio buffer to the stream
    stream.end(audioBuffer);
-
 }
+
+async function transcribeWithAssemblyAI (audioUrl, roomId) {
+    console.log("transcription started for: ", audioUrl)
+    const client = new AssemblyAI({
+      apiKey: process.env.ASSEMBLYAI_API_KEY
+    });
+    console.log("API key: ", process.env.ASSEMBLYAI_API_KEY);
+  
+    const audioFile = audioUrl;
+    const params = {
+      audio: audioFile,
+      speech_model: 'best',
+      language_detection: true,
+    }
+  
+    const run = async () => {
+      console.log("Before transcript")
+      const transcript  = await client.transcripts.transcribe(params);
+      console.log("After transcript: ", transcript);
+      
+  
+      if (transcript.status === 'error') {
+        console.error(`Transcription failed: ${transcript.error}`);
+        process.exit(1);
+      }
+  
+      console.log("Transcript : ", transcript.text);
+      const summaryAI = await openaiRequest(transcript.text);
+      console.log("SummaryAI : ", summaryAI);
+    }
+    run();
+  }
 
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
