@@ -19,8 +19,8 @@ export async function transcribeWithAssemblyAI(audioUrl) {
     console.log('Transcript ID:', transcriptId);
 
     // Poll for transcription completion
-    const transcriptText = await pollForTranscription(transcriptId);
-    return transcriptText;
+    const transcript = await pollForTranscription(transcriptId);
+    return { text: transcript.text, utterances: transcript.utterances };
   } catch (error) {
     console.error('Error in AssemblyAI transcription:', error);
     throw error;
@@ -38,7 +38,7 @@ async function pollForTranscription(transcriptId) {
 
         if (transcript.status === 'completed') {
           clearInterval(intervalId);
-          resolve(transcript.text); // Return the transcript text
+          resolve(transcript); // Return the entire transcript object
         } else if (transcript.status === 'error') {
           clearInterval(intervalId);
           console.error('Transcription failed:', transcript.error);
@@ -47,6 +47,6 @@ async function pollForTranscription(transcriptId) {
       } catch (error) {
         console.error('Error polling transcription status:', error);
       }
-    }, 5000); // Poll every 5 seconds
+    }, 2000); // Poll every 2 seconds
   });
 }
