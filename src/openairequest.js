@@ -1,7 +1,5 @@
-// openairequest.js
-require('dotenv').config();
 
-async function openaiRequest(userMessage) {
+export async function openaiRequest(userMessage) {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
 
@@ -46,5 +44,3 @@ async function openaiRequest(userMessage) {
     throw error;
   }
 }
-
-module.exports = openaiRequest;

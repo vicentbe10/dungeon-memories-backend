@@ -1,9 +1,11 @@
-const express = require('express');
+import express from 'express';
+import db from '../database.js';
+import { bucket } from '../services/firebaseService.js';
+
 const router = express.Router();
 
 // Firebase Admin SDK
-const admin = require('firebase-admin');
-const db = require('knex')(require('../knexfile')[process.env.NODE_ENV || 'development']);
+import admin from 'firebase-admin';
 
 // TODO: Middleware for authentication
 // const authenticate = require('../middleware/authenticate');
@@ -49,4 +51,4 @@ router.get('/download/:filename', /* authenticate, */ async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;
